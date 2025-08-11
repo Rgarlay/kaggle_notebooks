@@ -1,1 +1,934 @@
-{"metadata":{"kernelspec":{"language":"python","display_name":"Python 3","name":"python3"},"language_info":{"name":"python","version":"3.11.13","mimetype":"text/x-python","codemirror_mode":{"name":"ipython","version":3},"pygments_lexer":"ipython3","nbconvert_exporter":"python","file_extension":".py"},"kaggle":{"accelerator":"none","dataSources":[{"sourceId":94635,"databundleVersionId":13121456,"sourceType":"competition"}],"dockerImageVersionId":31089,"isInternetEnabled":false,"language":"python","sourceType":"notebook","isGpuEnabled":false}},"nbformat_minor":4,"nbformat":4,"cells":[{"cell_type":"code","source":"import os\nos.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppresses TensorFlow INFO and WARNING logs\nos.environ[\"PYDEVD_DISABLE_FILE_VALIDATION\"] = \"1\"\n# Optional: also suppress absl warnings\nimport absl.logging\nabsl.logging.set_verbosity(absl.logging.ERROR)","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-11T09:31:39.377832Z","iopub.status.idle":"2025-08-11T09:31:39.378286Z","shell.execute_reply.started":"2025-08-11T09:31:39.378072Z","shell.execute_reply":"2025-08-11T09:31:39.378092Z"}},"outputs":[],"execution_count":null},{"cell_type":"code","source":"# This Python 3 environment comes with many helpful analytics libraries installed\n# It is defined by the kaggle/python Docker image: https://github.com/kaggle/docker-python\n# For example, here's several helpful packages to load\n\nimport numpy as np # linear algebra\nimport pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)\npd.set_option('display.max_columns', None)\npd.set_option('display.max_colwidth',None)\nimport re\nimport nltk\nfrom nltk.stem import WordNetLemmatizer\nfrom sklearn.model_selection import train_test_split\nfrom tensorflow.keras.layers import Dense, Embedding, Concatenate, Input, LSTM\nfrom tensorflow.keras.models import Model\nfrom tensorflow.keras.metrics import AUC\nfrom tensorflow.keras.layers import SimpleRNN, Dense,Reshape, Dropout\nfrom tensorflow.keras.optimizers import Adam\nfrom tensorflow.keras.layers import Attention, Flatten, GlobalAveragePooling1D,BatchNormalization, Bidirectional, Add, GRU\nfrom tensorflow.keras.regularizers import l2\nfrom tensorflow.keras.preprocessing.text import Tokenizer\nfrom keras.utils import pad_sequences\n\n# Input data files are available in the read-only \"../input/\" directory\n# For example, running this (by clicking run or pressing Shift+Enter) will list all files under the input directory\n\nimport os\nfor dirname, _, filenames in os.walk('/kaggle/input'):\n    for filename in filenames:\n        print(os.path.join(dirname, filename))\n\n\n\n\n# You can write up to 20GB to the current directory (/kaggle/working/) that gets preserved as output when you create a version using \"Save & Run All\" \n# You can also write temporary files to /kaggle/temp/, but they won't be saved outside of the current session","metadata":{"_uuid":"8f2839f25d086af736a60e9eeb907d3b93b6e0e5","_cell_guid":"b1076dfc-b9ad-4769-8c92-a6c4dae69d19","trusted":true,"execution":{"iopub.status.busy":"2025-08-11T09:34:08.915261Z","iopub.execute_input":"2025-08-11T09:34:08.915930Z","iopub.status.idle":"2025-08-11T09:34:27.239962Z","shell.execute_reply.started":"2025-08-11T09:34:08.915890Z","shell.execute_reply":"2025-08-11T09:34:27.239115Z"}},"outputs":[{"name":"stderr","text":"2025-08-11 09:34:12.639823: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:477] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered\nWARNING: All log messages before absl::InitializeLog() is called are written to STDERR\nE0000 00:00:1754904852.895691      50 cuda_dnn.cc:8310] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered\nE0000 00:00:1754904852.971109      50 cuda_blas.cc:1418] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered\n","output_type":"stream"},{"name":"stdout","text":"/kaggle/input/jigsaw-agile-community-rules/sample_submission.csv\n/kaggle/input/jigsaw-agile-community-rules/train.csv\n/kaggle/input/jigsaw-agile-community-rules/test.csv\n","output_type":"stream"}],"execution_count":4},{"cell_type":"code","source":"combined_stopwords = {\"'d\", \"'ll\", \"'m\", \"'re\", \"'s\", \"'ve\", 'a', 'about', 'above', 'across', 'after', 'afterwards',\n                      'again', 'against', 'ain', 'all', 'almost', 'alone', 'along', 'already', 'also', 'although', 'always',\n                      'am', 'among', 'amongst', 'amount', 'an', 'and', 'another', 'any', 'anyhow', 'anyone', 'anything', 'anyway', \n                      'anywhere', 'are', 'aren', \"aren't\", 'around', 'as', 'at', 'back', 'be', 'became', 'because', 'become', 'becomes',\n                      'becoming', 'been', 'before', 'beforehand', 'behind', 'being', 'below', 'beside', 'besides', 'between', 'beyond', \n                      'both', 'bottom', 'but', 'by', 'ca', 'call', 'can', 'cannot', 'could', 'couldn', \"couldn't\", 'd', 'did', 'didn', \"didn't\",\n                      'do', 'does', 'doesn', \"doesn't\", 'doing', 'don', \"don't\", 'done', 'down', 'due', 'during', 'each', 'eight', 'either', \n                      'eleven', 'else', 'elsewhere', 'empty', 'enough', 'even', 'ever', 'every', 'everyone', 'everything', 'everywhere', 'except',\n                      'few', 'fifteen', 'fifty', 'first', 'five', 'for', 'former', 'formerly', 'forty', 'four', 'from', 'front', 'full', 'further',\n                      'get', 'give', 'go', 'had', 'hadn', \"hadn't\", 'has', 'hasn', \"hasn't\", 'have', 'haven', \"haven't\", 'having', 'he', \"he'd\", \n                      \"he'll\", \"he's\", 'hence', 'her', 'here', 'hereafter', 'hereby', 'herein', 'hereupon', 'hers', 'herself', 'him', 'himself',\n                      'his', 'how', 'however', 'hundred', 'i', \"i'd\", \"i'll\", \"i'm\", \"i've\", 'if', 'in', 'indeed', 'into', 'is', 'isn', \"isn't\",\n                      'it', \"it'd\", \"it'll\", \"it's\", 'its', 'itself', 'just', 'keep', 'last', 'latter', 'latterly', 'least', 'less', 'll', 'm', \n                      'ma', 'made', 'make', 'many', 'may', 'me', 'meanwhile', 'might', 'mightn', \"mightn't\", 'mine', 'more', 'moreover', 'most',\n                      'mostly', 'move', 'much', 'must', 'mustn', \"mustn't\", 'my', 'myself', \"n't\", 'name', 'namely', 'needn', \"needn't\", 'neither', \n                      'never', 'nevertheless', 'next', 'nine', 'no', 'nobody', 'none', 'noone', 'nor', 'not', 'nothing', 'now', 'nowhere', 'n‘t',\n                      'n’t', 'o', 'of', 'off', 'often', 'on', 'once', 'one', 'only', 'onto', 'or', 'other', 'others', 'otherwise', 'our', 'ours',\n                      'ourselves', 'out', 'over', 'own', 'part', 'per', 'perhaps', 'please', 'put', 'quite', 'rather', 're', 'really', 'regarding',\n                      's', 'same', 'say', 'see', 'seem', 'seemed', 'seeming', 'seems', 'serious', 'several', 'shan', \"shan't\", 'she', \"she'd\",\n                      \"she'll\", \"she's\", 'should', \"should've\", 'shouldn', \"shouldn't\", 'show', 'side', 'since', 'six', 'sixty', 'so', 'some',\n                      'somehow', 'someone', 'something', 'sometime', 'sometimes', 'somewhere', 'still', 'such', 't', 'take', 'ten', 'than', \n                      'that', \"that'll\", 'the', 'their', 'theirs', 'them', 'themselves', 'then', 'thence', 'there', 'thereafter', 'thereby', \n                      'therefore', 'therein', 'thereupon', 'these', 'they', \"they'd\", \"they'll\", \"they're\", \"they've\", 'third', 'this', 'those', \n                      'though', 'three', 'through', 'throughout', 'thru', 'thus', 'to', 'together', 'too', 'top', 'toward', 'towards', 'twelve',\n                      'twenty', 'two', 'under', 'unless', 'until', 'up', 'upon', 'us', 'used', 'using', 'various', 've', 'very', 'via', 'was', \n                      'wasn', \"wasn't\", 'we', \"we'd\", \"we'll\", \"we're\", \"we've\", 'well', 'were', 'weren', \"weren't\", 'what', 'whatever', 'when',\n                      'whence', 'whenever', 'where', 'whereafter', 'whereas', 'whereby', 'wherein', 'whereupon', 'wherever', 'whether', 'which',\n                      'while', 'whither', 'who', 'whoever', 'whole', 'whom', 'whose', 'why', 'will', 'with', 'within', 'without', 'won', \"won't\",\n                      'would', 'wouldn', \"wouldn't\", 'y', 'yet', 'you', \"you'd\", \"you'll\", \"you're\", \"you've\", 'your', 'yours', 'yourself',\n                      'yourselves', '‘d', '‘ll', '‘m', '‘re', '‘s', '‘ve', '’d', '’ll', '’m', '’re', '’s', '’ve'}\n","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-11T09:34:27.241518Z","iopub.execute_input":"2025-08-11T09:34:27.242091Z","iopub.status.idle":"2025-08-11T09:34:27.256017Z","shell.execute_reply.started":"2025-08-11T09:34:27.242067Z","shell.execute_reply":"2025-08-11T09:34:27.255150Z"},"jupyter":{"source_hidden":true}},"outputs":[],"execution_count":5},{"cell_type":"code","source":"df_train_original = pd.read_csv('/kaggle/input/jigsaw-agile-community-rules/train.csv')\ndf_test_original = pd.read_csv('/kaggle/input/jigsaw-agile-community-rules/test.csv')","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-11T09:40:30.655937Z","iopub.execute_input":"2025-08-11T09:40:30.656224Z","iopub.status.idle":"2025-08-11T09:40:30.702895Z","shell.execute_reply.started":"2025-08-11T09:40:30.656206Z","shell.execute_reply":"2025-08-11T09:40:30.701936Z"}},"outputs":[],"execution_count":20},{"cell_type":"code","source":"# def dataset_basics(df):\n#     print(f'Number of empty rows \\n {df_train.isna().sum()} \\n')\n#     print(f'Number of duplicate rows {df.duplicated().sum()} \\n')\n#     print(f'\\n Dtypes and other info \\n {df.info()} \\n')\n#     print(f'Shape of the dataframe {df.shape}')\n#     print(f'no_of unique subreddits',df['subreddit'].nunique())\n#     print(f'Percent of 0s and 1s: ',df['rule_violation'].value_counts()/df_train.shape[0] * 100)\n# dataset_basics(df_train_original)","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-11T09:40:30.889046Z","iopub.execute_input":"2025-08-11T09:40:30.889382Z","iopub.status.idle":"2025-08-11T09:40:30.893531Z","shell.execute_reply.started":"2025-08-11T09:40:30.889355Z","shell.execute_reply":"2025-08-11T09:40:30.892823Z"},"jupyter":{"source_hidden":true}},"outputs":[],"execution_count":21},{"cell_type":"code","source":"df_train = df_train_original['rule'].str.split(',',expand=True)\n\ndf_train.fillna('0',inplace=True)\n\ndf_train.columns = ['rule 1','rule 2','rule 3','rule 4']\n\n## till here it works perfectly\n\ndf_train['rule 2'] = df_train['rule 2'].apply(lambda x : 1 if 'referral links' in str(x).lower() else 0)\n\ndf_train = df_train.rename(columns = {'rule 2':'referral link allowed'})\n\n#column 0 (legal_advice)\n\ndf_train['legal_advice_allowed'] = df_train['rule 1'].apply(lambda x: 0 if 'legal' in str(x).lower() else 1)\n\n#column 1\ndf_train['rule 4'] = df_train['rule 4'].apply(lambda x: 0 if 'promotional' in str(x).lower() else 1)\n\ndf_train = df_train.rename(columns = {'rule 4':'Promotions allowed'})\n\n##column 1: advertising\n\ndf_train['rule 3'] = df_train['rule 3'].apply(lambda x: 0 if 'advertising' in str(x).lower() else 1)\n\ndf_train = df_train.rename(columns = {'rule 3':'Advertising allowed'})\n\n## Dealing with  spam part using new created dataframe\n\ndf_train_1 = df_train['rule 1'].str.split(':',expand=True)\n\ndf_train = df_train.drop(columns = ['rule 1'])\n\ndf_train_1.columns = ['Advert','spam']\n\ndf_train_1 = df_train_1.drop(columns = ['Advert'])\n    \ndf_train_1['spam allowed'] = df_train_1['spam'].apply(lambda x: 0 if 'spam' in str(x).lower() else 1)\n\ndf_train['spam allowed'] = df_train_1['spam allowed']\n\n### Testing Data \n\ndf_test = df_test_original['rule'].str.split(',', expand=True)\n\ndf_test.fillna('0', inplace=True)\n\ndf_test.columns = ['rule 1', 'rule 2', 'rule 3', 'rule 4']\n\n## till here it works perfectly\n\ndf_test['rule 2'] = df_test['rule 2'].apply(lambda x: 1 if 'referral links' in str(x).lower() else 0)\n\ndf_test = df_test.rename(columns={'rule 2': 'referral link allowed'})\n\n# column 0 (legal_advice)\ndf_test['legal_advice_allowed'] = df_test['rule 1'].apply(lambda x: 0 if 'legal' in str(x).lower() else 1)\n\n# column 1\ndf_test['rule 4'] = df_test['rule 4'].apply(lambda x: 0 if 'promotional' in str(x).lower() else 1)\n\ndf_test = df_test.rename(columns={'rule 4': 'Promotions allowed'})\n\n# column 1: advertising\ndf_test['rule 3'] = df_test['rule 3'].apply(lambda x: 0 if 'advertising' in str(x).lower() else 1)\n\ndf_test = df_test.rename(columns={'rule 3': 'Advertising allowed'})\n\n## Dealing with spam part using new created dataframe\ndf_test_1 = df_test['rule 1'].str.split(':', expand=True)\n\ndf_test = df_test.drop(columns=['rule 1'])\n\ndf_test_1.columns = ['Advert', 'spam']\n\ndf_test_1 = df_test_1.drop(columns=['Advert'])\n    \ndf_test_1['spam allowed'] = df_test_1['spam'].apply(lambda x: 0 if 'spam' in str(x).lower() else 1)\n\ndf_test['spam allowed'] = df_test_1['spam allowed']\n","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-11T09:40:31.064123Z","iopub.execute_input":"2025-08-11T09:40:31.064437Z","iopub.status.idle":"2025-08-11T09:40:31.103216Z","shell.execute_reply.started":"2025-08-11T09:40:31.064412Z","shell.execute_reply":"2025-08-11T09:40:31.102267Z"}},"outputs":[],"execution_count":22},{"cell_type":"code","source":"for i in df_train.columns:\n    df_train_original[i] = df_train[i]\n\nfor i in df_test.columns:\n    df_test_original[i] = df_test[i]","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-11T09:40:31.219500Z","iopub.execute_input":"2025-08-11T09:40:31.220142Z","iopub.status.idle":"2025-08-11T09:40:31.229573Z","shell.execute_reply.started":"2025-08-11T09:40:31.220118Z","shell.execute_reply":"2025-08-11T09:40:31.228651Z"}},"outputs":[],"execution_count":23},{"cell_type":"code","source":"df_original = df_train_original[['body', 'rule_violation','referral link allowed', 'Advertising allowed',\n           'Promotions allowed', 'legal_advice_allowed', 'spam allowed']]\n    \ndf_p1 = df_train_original[['positive_example_1','rule_violation','referral link allowed', 'Advertising allowed',\n               'Promotions allowed', 'legal_advice_allowed', 'spam allowed']]\n\ndf_p1.loc[:,'rule_violation'] = 0\ndf_p1 = df_p1.rename(columns = {'positive_example_1':'body'})\n        \ndf_p2 = df_train_original[['positive_example_2','rule_violation','referral link allowed', 'Advertising allowed',\n               'Promotions allowed', 'legal_advice_allowed', 'spam allowed']]\n\ndf_p2.loc[:,'rule_violation'] = 0\ndf_p2 = df_p2.rename(columns = {'positive_example_2':'body'})\n        \ndf_n1 = df_train_original[['negative_example_1','rule_violation','referral link allowed', 'Advertising allowed',\n               'Promotions allowed', 'legal_advice_allowed', 'spam allowed']]\n\ndf_n1.loc[:,'rule_violation'] = 1\ndf_n1 = df_n1.rename(columns = {'negative_example_1':'body'})\n        \ndf_n2 = df_train_original[['negative_example_2','rule_violation','referral link allowed', 'Advertising allowed',\n               'Promotions allowed', 'legal_advice_allowed', 'spam allowed']]\n\ndf_n2.loc[:,'rule_violation'] = 1\ndf_n2 = df_n2.rename(columns = {'negative_example_2':'body'})\n    \ndf_train_total = pd.concat([df_original,df_p1,df_p2,df_n1,df_n2], axis = 0,ignore_index=True)\n\n\n##TESTING DATA\n\ndf_test_total = df_test_original[['body','referral link allowed', 'Advertising allowed',\n           'Promotions allowed', 'legal_advice_allowed', 'spam allowed']]        ","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-11T09:40:32.703557Z","iopub.execute_input":"2025-08-11T09:40:32.704149Z","iopub.status.idle":"2025-08-11T09:40:32.722210Z","shell.execute_reply.started":"2025-08-11T09:40:32.704123Z","shell.execute_reply":"2025-08-11T09:40:32.721369Z"}},"outputs":[],"execution_count":24},{"cell_type":"code","source":"text_file = df_train_total['body'].to_list()\n    \npattern = re.compile('https?:\\/\\/\\S+|www\\.\\S+|Https?:\\/\\/\\S+|\\S+\\.com\\S+|\\S+\\.com|\\[.*?\\]|\\S+ \\. com.*')   ## Removing URLs\nfor i in range(len(text_file)):\n    text_file[i] = pattern.sub(r'',text_file[i])\n    \npattern = re.compile('<.*?>')       ##Removing HTML rags\nfor i in range(len(text_file)):\n    text_file[i] = pattern.sub(r'',text_file[i]) \n    \npattern = re.compile('#\\S+|@\\S+|\\S+\\@\\S+|\\S+@')             ## Removing Emails and Hashtags\nfor i in range(len(text_file)):\n    text_file[i] = pattern.sub(r'',text_file[i])            ### Removing username and subreddit mentions\n    \npattern = re.compile('u\\/\\S+|r\\/\\S+')\nfor i in range(len(text_file)):\n    text_file[i] = pattern.sub(r'',text_file[i])\n        \npattern = re.compile(\"[\"\n                        u\"\\U0001F600-\\U0001F64F\"  # emoticons\n                        u\"\\U0001F300-\\U0001F5FF\"  # symbols & pictographs\n                        u\"\\U0001F680-\\U0001F6FF\"  # transport & map symbols\n                        u\"\\U0001F1E0-\\U0001F1FF\"  # flags (iOS)\n                        u\"\\U00002702-\\U000027B0\"\n                        u\"\\U000024C2-\\U0001F251\"\n                        \"]+\", flags=re.UNICODE)\nfor i in range(len(text_file)):\n    text_file[i] = pattern.sub(r'',text_file[i])\n\npattern = re.compile('\\d|\\\\n')             ##Removing Numbers & \\n spaces\nfor i in range(len(text_file)):\n    text_file[i] = pattern.sub(r'',text_file[i])\n\n\n##TESTING DATA -------------------------------------------------------\n\ntext_file_1 = df_test_total['body'].to_list()\n    \npattern = re.compile('https?:\\/\\/\\S+|www\\.\\S+|Https?:\\/\\/\\S+|\\S+\\.com\\S+|\\S+\\.com|\\[.*?\\]|\\S+ \\. com.*')   ## Removing URLs\nfor i in range(len(text_file_1)):\n    text_file_1[i] = pattern.sub(r'',text_file_1[i])\n    \npattern = re.compile('<.*?>')       ##Removing HTML rags\nfor i in range(len(text_file_1)):\n    text_file_1[i] = pattern.sub(r'',text_file_1[i]) \n    \npattern = re.compile('#\\S+|@\\S+|\\S+\\@\\S+|\\S+@')             ## Removing Emails and Hashtags\nfor i in range(len(text_file_1)):\n    text_file_1[i] = pattern.sub(r'',text_file_1[i])            ### Removing username and subreddit mentions\n    \npattern = re.compile('u\\/\\S+|r\\/\\S+')\nfor i in range(len(text_file_1)):\n    text_file_1[i] = pattern.sub(r'',text_file_1[i])\n        \npattern = re.compile(\"[\"\n                        u\"\\U0001F600-\\U0001F64F\"  # emoticons\n                        u\"\\U0001F300-\\U0001F5FF\"  # symbols & pictographs\n                        u\"\\U0001F680-\\U0001F6FF\"  # transport & map symbols\n                        u\"\\U0001F1E0-\\U0001F1FF\"  # flags (iOS)\n                        u\"\\U00002702-\\U000027B0\"\n                        u\"\\U000024C2-\\U0001F251\"\n                        \"]+\", flags=re.UNICODE)\nfor i in range(len(text_file_1)):\n    text_file_1[i] = pattern.sub(r'',text_file_1[i])\n\npattern = re.compile('\\d|\\\\n')             ##Removing Numbers & \\n spaces\nfor i in range(len(text_file_1)):\n    text_file_1[i] = pattern.sub(r'',text_file_1[i])","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-11T09:40:33.704124Z","iopub.execute_input":"2025-08-11T09:40:33.704409Z","iopub.status.idle":"2025-08-11T09:40:34.202213Z","shell.execute_reply.started":"2025-08-11T09:40:33.704390Z","shell.execute_reply":"2025-08-11T09:40:34.201307Z"}},"outputs":[],"execution_count":25},{"cell_type":"code","source":"df_test_total.head()","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-11T09:40:35.639721Z","iopub.execute_input":"2025-08-11T09:40:35.640535Z","iopub.status.idle":"2025-08-11T09:40:35.649495Z","shell.execute_reply.started":"2025-08-11T09:40:35.640512Z","shell.execute_reply":"2025-08-11T09:40:35.648527Z"}},"outputs":[{"execution_count":26,"output_type":"execute_result","data":{"text/plain":"                                                                                                                                                                                                                                                                                                                                                                                                                        body  \\\n0                                                                                                                                                                                                                                                                                                                                                       NEW RAP GROUP 17. CHECK US OUT https://soundcloud.com/user-125895482   \n1  Make your life comfortable. Get up to 15% Discount. Pain killers Like Roxycodone, Hydrocodone, Codeine, Percocet, Hydrocodone, Oxycodone and Lortab. Also get full treatment of Depression, Insomnia and other such problems with Adderall, Ativan, **[Xanax](http://onestoppharma.org)**, Mogadon, Modafinil and Many Others Treatments Online **Without Prescription at [onestoppharma.org](http://onestoppharma.org)**   \n2                                                                                                                                                                                                                   Kickin' ass and selling underwear!\\nJust made my account last night. You guys should do the same and follow up on my photos and more 😘\\n\\n\\n[find me here❤️](http://www.pantydeal.com/member/Ineffable)    \n3                                                                                                                                                                                                                                                                                                                                                                    watch  hooters  best  therein  http://clickand.co/5agw-   \n4                                                                                                                                                                                                                                                                                                                                                             bitches  for free  at this point  show all  http://ur.my/212hg   \n\n   referral link allowed  Advertising allowed  Promotions allowed  \\\n0                      1                    0                   0   \n1                      0                    1                   1   \n2                      1                    0                   0   \n3                      1                    0                   0   \n4                      1                    0                   0   \n\n   legal_advice_allowed  spam allowed  \n0                     1             0  \n1                     0             1  \n2                     1             0  \n3                     1             0  \n4                     1             0  ","text/html":"<div>\n<style scoped>\n    .dataframe tbody tr th:only-of-type {\n        vertical-align: middle;\n    }\n\n    .dataframe tbody tr th {\n        vertical-align: top;\n    }\n\n    .dataframe thead th {\n        text-align: right;\n    }\n</style>\n<table border=\"1\" class=\"dataframe\">\n  <thead>\n    <tr style=\"text-align: right;\">\n      <th></th>\n      <th>body</th>\n      <th>referral link allowed</th>\n      <th>Advertising allowed</th>\n      <th>Promotions allowed</th>\n      <th>legal_advice_allowed</th>\n      <th>spam allowed</th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <th>0</th>\n      <td>NEW RAP GROUP 17. CHECK US OUT https://soundcloud.com/user-125895482</td>\n      <td>1</td>\n      <td>0</td>\n      <td>0</td>\n      <td>1</td>\n      <td>0</td>\n    </tr>\n    <tr>\n      <th>1</th>\n      <td>Make your life comfortable. Get up to 15% Discount. Pain killers Like Roxycodone, Hydrocodone, Codeine, Percocet, Hydrocodone, Oxycodone and Lortab. Also get full treatment of Depression, Insomnia and other such problems with Adderall, Ativan, **[Xanax](http://onestoppharma.org)**, Mogadon, Modafinil and Many Others Treatments Online **Without Prescription at [onestoppharma.org](http://onestoppharma.org)**</td>\n      <td>0</td>\n      <td>1</td>\n      <td>1</td>\n      <td>0</td>\n      <td>1</td>\n    </tr>\n    <tr>\n      <th>2</th>\n      <td>Kickin' ass and selling underwear!\\nJust made my account last night. You guys should do the same and follow up on my photos and more 😘\\n\\n\\n[find me here❤️](http://www.pantydeal.com/member/Ineffable)</td>\n      <td>1</td>\n      <td>0</td>\n      <td>0</td>\n      <td>1</td>\n      <td>0</td>\n    </tr>\n    <tr>\n      <th>3</th>\n      <td>watch  hooters  best  therein  http://clickand.co/5agw-</td>\n      <td>1</td>\n      <td>0</td>\n      <td>0</td>\n      <td>1</td>\n      <td>0</td>\n    </tr>\n    <tr>\n      <th>4</th>\n      <td>bitches  for free  at this point  show all  http://ur.my/212hg</td>\n      <td>1</td>\n      <td>0</td>\n      <td>0</td>\n      <td>1</td>\n      <td>0</td>\n    </tr>\n  </tbody>\n</table>\n</div>"},"metadata":{}}],"execution_count":26},{"cell_type":"code","source":"df_train_total = df_train_total.drop(columns = ['body'])\ndf_test_total = df_test_total.drop(columns = ['body'])","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-11T09:42:05.348013Z","iopub.execute_input":"2025-08-11T09:42:05.348314Z","iopub.status.idle":"2025-08-11T09:42:05.355358Z","shell.execute_reply.started":"2025-08-11T09:42:05.348289Z","shell.execute_reply":"2025-08-11T09:42:05.354404Z"}},"outputs":[],"execution_count":30},{"cell_type":"code","source":"## Works perfectly\n\n\n\nx = df_train_total.drop(columns = ['rule_violation'])\ny = df_train_total['rule_violation']\n\nfrom sklearn.model_selection import train_test_split\n\nx_train,x_test,y_train,y_test = train_test_split(x,y,train_size = 0.75, random_state = 42)\n\n","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-11T09:41:08.242189Z","iopub.execute_input":"2025-08-11T09:41:08.242537Z","iopub.status.idle":"2025-08-11T09:41:08.255496Z","shell.execute_reply.started":"2025-08-11T09:41:08.242516Z","shell.execute_reply":"2025-08-11T09:41:08.254688Z"}},"outputs":[],"execution_count":28},{"cell_type":"code","source":"lemmatizer = WordNetLemmatizer()\ncleaned_text = []\npreprocessed_training_text = []\nfor i in range(len(df_train_total)):\n    text1 = re.sub('[^a-zA-Z]',' ',text_file[i])\n    text1 = text1.lower()\n    text1 = [lemmatizer.lemmatize(word) for word in text1 if word not in combined_stopwords]\n    cleaned_text = ''.join(text1)\n    preprocessed_training_text.append(cleaned_text)\n\n##TESTING DATA\n\ncleaned_text1 = []\npreprocessed_testing_text1 = []\nfor i in range(len(df_test_total)):\n    text1 = re.sub('[^a-zA-Z]',' ',text_file_1[i])\n    text1 = text1.lower()\n    text1 = [lemmatizer.lemmatize(word) for word in text1 if word not in combined_stopwords]\n    cleaned_text1 = ''.join(text1)\n    preprocessed_testing_text1.append(cleaned_text1)\n","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-11T09:41:53.305386Z","iopub.execute_input":"2025-08-11T09:41:53.305702Z","iopub.status.idle":"2025-08-11T09:42:00.018474Z","shell.execute_reply.started":"2025-08-11T09:41:53.305682Z","shell.execute_reply":"2025-08-11T09:42:00.017486Z"}},"outputs":[],"execution_count":29},{"cell_type":"code","source":"df_train_total['body'] = preprocessed_training_text\ndf_test_total['body'] = preprocessed_testing_text1  ##Test file (not used right now)","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-11T09:42:32.489123Z","iopub.execute_input":"2025-08-11T09:42:32.489515Z","iopub.status.idle":"2025-08-11T09:42:32.497645Z","shell.execute_reply.started":"2025-08-11T09:42:32.489478Z","shell.execute_reply":"2025-08-11T09:42:32.496629Z"}},"outputs":[],"execution_count":31},{"cell_type":"code","source":"x = df_train_total.drop(columns = ['rule_violation'])\ny = df_train_total['rule_violation']\n\nfrom sklearn.model_selection import train_test_split\n\nx_train,x_test,y_train,y_test = train_test_split(x,y,train_size = 0.75, random_state = 42)","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-11T09:42:42.929421Z","iopub.execute_input":"2025-08-11T09:42:42.929771Z","iopub.status.idle":"2025-08-11T09:42:42.940503Z","shell.execute_reply.started":"2025-08-11T09:42:42.929746Z","shell.execute_reply":"2025-08-11T09:42:42.939639Z"}},"outputs":[],"execution_count":32},{"cell_type":"code","source":"##Now we have to do some tokenization\n\nfrom sklearn.feature_extraction.text import TfidfVectorizer\n\nvector = TfidfVectorizer(max_features = 2500, ngram_range= (1,2))\n\nx_train_tokenized = vector.fit_transform(x_train['body'])\nx_test_tokenized = vector.transform(x_test['body'])\n\n","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-11T09:47:55.718029Z","iopub.execute_input":"2025-08-11T09:47:55.718361Z","iopub.status.idle":"2025-08-11T09:47:56.095754Z","shell.execute_reply.started":"2025-08-11T09:47:55.718337Z","shell.execute_reply":"2025-08-11T09:47:56.094842Z"}},"outputs":[],"execution_count":36},{"cell_type":"code","source":"from xgboost import XGBClassifier","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-11T09:42:57.833111Z","iopub.execute_input":"2025-08-11T09:42:57.833435Z","iopub.status.idle":"2025-08-11T09:42:58.210274Z","shell.execute_reply.started":"2025-08-11T09:42:57.833412Z","shell.execute_reply":"2025-08-11T09:42:58.209580Z"}},"outputs":[],"execution_count":33},{"cell_type":"code","source":"xgb = XGBClassifier()\n\nxgb.fit(x_train_tokenized,y_train)\n\ny_pred = xgb.predict_proba(x_test_tokenized)[:,1]\n\n","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-11T09:49:02.090176Z","iopub.execute_input":"2025-08-11T09:49:02.090454Z","iopub.status.idle":"2025-08-11T09:49:03.315446Z","shell.execute_reply.started":"2025-08-11T09:49:02.090435Z","shell.execute_reply":"2025-08-11T09:49:03.314843Z"}},"outputs":[],"execution_count":38},{"cell_type":"code","source":"from sklearn.metrics import roc_auc_score\n\nprint(roc_auc_score(y_test,y_pred))","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-11T09:49:30.477243Z","iopub.execute_input":"2025-08-11T09:49:30.477564Z","iopub.status.idle":"2025-08-11T09:49:30.487395Z","shell.execute_reply.started":"2025-08-11T09:49:30.477542Z","shell.execute_reply":"2025-08-11T09:49:30.486551Z"}},"outputs":[{"name":"stdout","text":"0.8281550260406956\n","output_type":"stream"}],"execution_count":39},{"cell_type":"code","source":"","metadata":{"trusted":true},"outputs":[],"execution_count":null},{"cell_type":"code","source":"# token = Tokenizer(num_words = 3000, oov_token='<OOV>')\n# ##training text tokenization and padding\n\n# token.fit_on_texts(preprocessed_training_text)\n# max_length = max(len(i.split()) for i in preprocessed_training_text)\n# training_sequence = token.texts_to_sequences(preprocessed_training_text)\n# x_train = pad_sequences(training_sequence, maxlen=max_length, padding='post')\n    \n\n\n#     # TENSORFLOW ARCHITECTURE HERE\n#     ## Feature dataset input preprocessing\n# feature_input = Input(shape=(5,), name = 'other_feature')\n# y = Dense(64, activation='relu', kernel_regularizer=l2(0.5))(feature_input)\n# y = BatchNormalization()(y)\n\n# ## Text input preprocessing\n# text_input = Input(shape=(83,), name='text_input')\n# embedding = Embedding(input_dim = 3000, output_dim = 128)(text_input)\n# x1 = GRU(64, return_sequences=True)(embedding)\n# x1 = Dropout(0.5)(x1)\n# x1 = Dense(32, activation = 'relu', kernel_regularizer=l2(0.5))(x1)\n\n# # Multi-Head Attention for better context\n# x2 = Attention()([x1, x1])\n\n# # Combine Attention output with LSTM via Residual Connection\n# # Pooling to flatten sequence\n# x = GlobalAveragePooling1D()(x2)\n\n\n# combined = Concatenate()([x,y])\n# rnn1 = Dense(64, activation='relu', kernel_regularizer=l2(0.5))(combined)\n# dropout2 = Dropout(0.6)(rnn1)\n# output = Dense(1, activation='sigmoid')(dropout2)\n\n# model = Model(inputs=[text_input, feature_input], outputs=output)\n# adam = Adam(learning_rate = 0.001)\n# model.compile(optimizer=adam, loss='binary_crossentropy', metrics=[AUC(curve='ROC', name='roc_auc')])\n# ## This architecture achieved loss: 0.4561 - roc_auc: 0.8632 - val_loss: 0.5426 - val_roc_auc: 0.8094 after 20 iterations. \n\n# history = model.fit(\n#     {'text_input': x_train, 'other_feature': x_feature_train},\n#     y_target,\n#     epochs=25, batch_size=50, verbose = 1,\n# )","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-11T09:49:52.529364Z","iopub.execute_input":"2025-08-11T09:49:52.529777Z","iopub.status.idle":"2025-08-11T09:49:52.535113Z","shell.execute_reply.started":"2025-08-11T09:49:52.529754Z","shell.execute_reply":"2025-08-11T09:49:52.534028Z"}},"outputs":[],"execution_count":40},{"cell_type":"markdown","source":"### ROC_AUC score for training dataset is 0.88.","metadata":{}},{"cell_type":"code","source":"x_train.shape","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-05T13:06:22.997320Z","iopub.execute_input":"2025-08-05T13:06:22.997986Z","iopub.status.idle":"2025-08-05T13:06:23.004264Z","shell.execute_reply.started":"2025-08-05T13:06:22.997957Z","shell.execute_reply":"2025-08-05T13:06:23.003557Z"}},"outputs":[],"execution_count":null},{"cell_type":"code","source":"x_test_features = df_test_total.drop(columns = ['body'])\ntesting_sequence = token.texts_to_sequences(preprocessed_testing_text)\nx_test = pad_sequences(testing_sequence, maxlen=max_length, padding='post')","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-05T13:06:26.116887Z","iopub.execute_input":"2025-08-05T13:06:26.117166Z","iopub.status.idle":"2025-08-05T13:06:26.122659Z","shell.execute_reply.started":"2025-08-05T13:06:26.117145Z","shell.execute_reply":"2025-08-05T13:06:26.122045Z"}},"outputs":[],"execution_count":null},{"cell_type":"code","source":"x_train.shape,x_test_features.shape,x_feature_train.shape,x_test.shape","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-05T13:06:30.041443Z","iopub.execute_input":"2025-08-05T13:06:30.041894Z","iopub.status.idle":"2025-08-05T13:06:30.046859Z","shell.execute_reply.started":"2025-08-05T13:06:30.041871Z","shell.execute_reply":"2025-08-05T13:06:30.046298Z"}},"outputs":[],"execution_count":null},{"cell_type":"code","source":"y_pred = model.predict({'text_input': x_test, 'other_feature': x_test_features})\n","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-05T13:06:30.372943Z","iopub.execute_input":"2025-08-05T13:06:30.373354Z","iopub.status.idle":"2025-08-05T13:06:30.638480Z","shell.execute_reply.started":"2025-08-05T13:06:30.373333Z","shell.execute_reply":"2025-08-05T13:06:30.637937Z"}},"outputs":[],"execution_count":null},{"cell_type":"code","source":"submission = pd.DataFrame({\"row_id\",\"rule_violation\"})","metadata":{"trusted":true},"outputs":[],"execution_count":null},{"cell_type":"code","source":"submission['rule_violation'] = np.round(y_pred,2)","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-05T13:06:33.409009Z","iopub.execute_input":"2025-08-05T13:06:33.409726Z","iopub.status.idle":"2025-08-05T13:06:33.413462Z","shell.execute_reply.started":"2025-08-05T13:06:33.409701Z","shell.execute_reply":"2025-08-05T13:06:33.412704Z"}},"outputs":[],"execution_count":null},{"cell_type":"code","source":"submission","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-05T13:06:33.954461Z","iopub.execute_input":"2025-08-05T13:06:33.955691Z","iopub.status.idle":"2025-08-05T13:06:33.984904Z","shell.execute_reply.started":"2025-08-05T13:06:33.955646Z","shell.execute_reply":"2025-08-05T13:06:33.983575Z"}},"outputs":[],"execution_count":null},{"cell_type":"code","source":"submission.to_csv(\"submission.csv\", index=False, columns=[\"row_id\", \"rule_violation\"])","metadata":{"trusted":true,"execution":{"iopub.status.busy":"2025-08-05T13:06:35.748824Z","iopub.execute_input":"2025-08-05T13:06:35.749418Z","iopub.status.idle":"2025-08-05T13:06:35.759096Z","shell.execute_reply.started":"2025-08-05T13:06:35.749394Z","shell.execute_reply":"2025-08-05T13:06:35.758528Z"}},"outputs":[],"execution_count":null},{"cell_type":"code","source":"","metadata":{"trusted":true},"outputs":[],"execution_count":null}]}
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "id": "a9b4e327",
+   "metadata": {
+    "_cell_guid": "b1076dfc-b9ad-4769-8c92-a6c4dae69d19",
+    "_uuid": "8f2839f25d086af736a60e9eeb907d3b93b6e0e5",
+    "execution": {
+     "iopub.execute_input": "2025-08-11T10:07:19.379233Z",
+     "iopub.status.busy": "2025-08-11T10:07:19.378390Z",
+     "iopub.status.idle": "2025-08-11T10:07:24.425889Z",
+     "shell.execute_reply": "2025-08-11T10:07:24.424629Z"
+    },
+    "papermill": {
+     "duration": 5.055479,
+     "end_time": "2025-08-11T10:07:24.427771",
+     "exception": false,
+     "start_time": "2025-08-11T10:07:19.372292",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "/kaggle/input/jigsaw-agile-community-rules/sample_submission.csv\n",
+      "/kaggle/input/jigsaw-agile-community-rules/train.csv\n",
+      "/kaggle/input/jigsaw-agile-community-rules/test.csv\n"
+     ]
+    }
+   ],
+   "source": [
+    "# This Python 3 environment comes with many helpful analytics libraries installed\n",
+    "# It is defined by the kaggle/python Docker image: https://github.com/kaggle/docker-python\n",
+    "# For example, here's several helpful packages to load\n",
+    "\n",
+    "import numpy as np # linear algebra\n",
+    "import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)\n",
+    "pd.set_option('display.max_columns', None)\n",
+    "pd.set_option('display.max_colwidth',None)\n",
+    "import re\n",
+    "import nltk\n",
+    "from nltk.stem import WordNetLemmatizer\n",
+    "from sklearn.model_selection import train_test_split\n",
+    "from sklearn.metrics import roc_auc_score\n",
+    "from sklearn.feature_extraction.text import TfidfVectorizer\n",
+    "from xgboost import XGBClassifier\n",
+    "\n",
+    "# Input data files are available in the read-only \"../input/\" directory\n",
+    "# For example, running this (by clicking run or pressing Shift+Enter) will list all files under the input directory\n",
+    "\n",
+    "import os\n",
+    "for dirname, _, filenames in os.walk('/kaggle/input'):\n",
+    "    for filename in filenames:\n",
+    "        print(os.path.join(dirname, filename))\n",
+    "\n",
+    "\n",
+    "\n",
+    "\n",
+    "# You can write up to 20GB to the current directory (/kaggle/working/) that gets preserved as output when you create a version using \"Save & Run All\" \n",
+    "# You can also write temporary files to /kaggle/temp/, but they won't be saved outside of the current session"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "id": "353bdaee",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2025-08-11T10:07:24.441487Z",
+     "iopub.status.busy": "2025-08-11T10:07:24.440364Z",
+     "iopub.status.idle": "2025-08-11T10:07:24.455879Z",
+     "shell.execute_reply": "2025-08-11T10:07:24.455029Z"
+    },
+    "jupyter": {
+     "source_hidden": true
+    },
+    "papermill": {
+     "duration": 0.023997,
+     "end_time": "2025-08-11T10:07:24.457322",
+     "exception": false,
+     "start_time": "2025-08-11T10:07:24.433325",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "combined_stopwords = {\"'d\", \"'ll\", \"'m\", \"'re\", \"'s\", \"'ve\", 'a', 'about', 'above', 'across', 'after', 'afterwards',\n",
+    "                      'again', 'against', 'ain', 'all', 'almost', 'alone', 'along', 'already', 'also', 'although', 'always',\n",
+    "                      'am', 'among', 'amongst', 'amount', 'an', 'and', 'another', 'any', 'anyhow', 'anyone', 'anything', 'anyway', \n",
+    "                      'anywhere', 'are', 'aren', \"aren't\", 'around', 'as', 'at', 'back', 'be', 'became', 'because', 'become', 'becomes',\n",
+    "                      'becoming', 'been', 'before', 'beforehand', 'behind', 'being', 'below', 'beside', 'besides', 'between', 'beyond', \n",
+    "                      'both', 'bottom', 'but', 'by', 'ca', 'call', 'can', 'cannot', 'could', 'couldn', \"couldn't\", 'd', 'did', 'didn', \"didn't\",\n",
+    "                      'do', 'does', 'doesn', \"doesn't\", 'doing', 'don', \"don't\", 'done', 'down', 'due', 'during', 'each', 'eight', 'either', \n",
+    "                      'eleven', 'else', 'elsewhere', 'empty', 'enough', 'even', 'ever', 'every', 'everyone', 'everything', 'everywhere', 'except',\n",
+    "                      'few', 'fifteen', 'fifty', 'first', 'five', 'for', 'former', 'formerly', 'forty', 'four', 'from', 'front', 'full', 'further',\n",
+    "                      'get', 'give', 'go', 'had', 'hadn', \"hadn't\", 'has', 'hasn', \"hasn't\", 'have', 'haven', \"haven't\", 'having', 'he', \"he'd\", \n",
+    "                      \"he'll\", \"he's\", 'hence', 'her', 'here', 'hereafter', 'hereby', 'herein', 'hereupon', 'hers', 'herself', 'him', 'himself',\n",
+    "                      'his', 'how', 'however', 'hundred', 'i', \"i'd\", \"i'll\", \"i'm\", \"i've\", 'if', 'in', 'indeed', 'into', 'is', 'isn', \"isn't\",\n",
+    "                      'it', \"it'd\", \"it'll\", \"it's\", 'its', 'itself', 'just', 'keep', 'last', 'latter', 'latterly', 'least', 'less', 'll', 'm', \n",
+    "                      'ma', 'made', 'make', 'many', 'may', 'me', 'meanwhile', 'might', 'mightn', \"mightn't\", 'mine', 'more', 'moreover', 'most',\n",
+    "                      'mostly', 'move', 'much', 'must', 'mustn', \"mustn't\", 'my', 'myself', \"n't\", 'name', 'namely', 'needn', \"needn't\", 'neither', \n",
+    "                      'never', 'nevertheless', 'next', 'nine', 'no', 'nobody', 'none', 'noone', 'nor', 'not', 'nothing', 'now', 'nowhere', 'n‘t',\n",
+    "                      'n’t', 'o', 'of', 'off', 'often', 'on', 'once', 'one', 'only', 'onto', 'or', 'other', 'others', 'otherwise', 'our', 'ours',\n",
+    "                      'ourselves', 'out', 'over', 'own', 'part', 'per', 'perhaps', 'please', 'put', 'quite', 'rather', 're', 'really', 'regarding',\n",
+    "                      's', 'same', 'say', 'see', 'seem', 'seemed', 'seeming', 'seems', 'serious', 'several', 'shan', \"shan't\", 'she', \"she'd\",\n",
+    "                      \"she'll\", \"she's\", 'should', \"should've\", 'shouldn', \"shouldn't\", 'show', 'side', 'since', 'six', 'sixty', 'so', 'some',\n",
+    "                      'somehow', 'someone', 'something', 'sometime', 'sometimes', 'somewhere', 'still', 'such', 't', 'take', 'ten', 'than', \n",
+    "                      'that', \"that'll\", 'the', 'their', 'theirs', 'them', 'themselves', 'then', 'thence', 'there', 'thereafter', 'thereby', \n",
+    "                      'therefore', 'therein', 'thereupon', 'these', 'they', \"they'd\", \"they'll\", \"they're\", \"they've\", 'third', 'this', 'those', \n",
+    "                      'though', 'three', 'through', 'throughout', 'thru', 'thus', 'to', 'together', 'too', 'top', 'toward', 'towards', 'twelve',\n",
+    "                      'twenty', 'two', 'under', 'unless', 'until', 'up', 'upon', 'us', 'used', 'using', 'various', 've', 'very', 'via', 'was', \n",
+    "                      'wasn', \"wasn't\", 'we', \"we'd\", \"we'll\", \"we're\", \"we've\", 'well', 'were', 'weren', \"weren't\", 'what', 'whatever', 'when',\n",
+    "                      'whence', 'whenever', 'where', 'whereafter', 'whereas', 'whereby', 'wherein', 'whereupon', 'wherever', 'whether', 'which',\n",
+    "                      'while', 'whither', 'who', 'whoever', 'whole', 'whom', 'whose', 'why', 'will', 'with', 'within', 'without', 'won', \"won't\",\n",
+    "                      'would', 'wouldn', \"wouldn't\", 'y', 'yet', 'you', \"you'd\", \"you'll\", \"you're\", \"you've\", 'your', 'yours', 'yourself',\n",
+    "                      'yourselves', '‘d', '‘ll', '‘m', '‘re', '‘s', '‘ve', '’d', '’ll', '’m', '’re', '’s', '’ve'}\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "id": "34cfc06f",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2025-08-11T10:07:24.466950Z",
+     "iopub.status.busy": "2025-08-11T10:07:24.466593Z",
+     "iopub.status.idle": "2025-08-11T10:07:24.558897Z",
+     "shell.execute_reply": "2025-08-11T10:07:24.557942Z"
+    },
+    "papermill": {
+     "duration": 0.099059,
+     "end_time": "2025-08-11T10:07:24.560804",
+     "exception": false,
+     "start_time": "2025-08-11T10:07:24.461745",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "df_train_original = pd.read_csv('/kaggle/input/jigsaw-agile-community-rules/train.csv')\n",
+    "df_test_original = pd.read_csv('/kaggle/input/jigsaw-agile-community-rules/test.csv')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "id": "cab60dfc",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2025-08-11T10:07:24.570475Z",
+     "iopub.status.busy": "2025-08-11T10:07:24.570161Z",
+     "iopub.status.idle": "2025-08-11T10:07:24.574714Z",
+     "shell.execute_reply": "2025-08-11T10:07:24.573593Z"
+    },
+    "jupyter": {
+     "source_hidden": true
+    },
+    "papermill": {
+     "duration": 0.011206,
+     "end_time": "2025-08-11T10:07:24.576236",
+     "exception": false,
+     "start_time": "2025-08-11T10:07:24.565030",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "# def dataset_basics(df):\n",
+    "#     print(f'Number of empty rows \\n {df_train.isna().sum()} \\n')\n",
+    "#     print(f'Number of duplicate rows {df.duplicated().sum()} \\n')\n",
+    "#     print(f'\\n Dtypes and other info \\n {df.info()} \\n')\n",
+    "#     print(f'Shape of the dataframe {df.shape}')\n",
+    "#     print(f'no_of unique subreddits',df['subreddit'].nunique())\n",
+    "#     print(f'Percent of 0s and 1s: ',df['rule_violation'].value_counts()/df_train.shape[0] * 100)\n",
+    "# dataset_basics(df_train_original)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 5,
+   "id": "c6e5145a",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2025-08-11T10:07:24.585563Z",
+     "iopub.status.busy": "2025-08-11T10:07:24.585223Z",
+     "iopub.status.idle": "2025-08-11T10:07:24.635535Z",
+     "shell.execute_reply": "2025-08-11T10:07:24.634585Z"
+    },
+    "papermill": {
+     "duration": 0.05705,
+     "end_time": "2025-08-11T10:07:24.637455",
+     "exception": false,
+     "start_time": "2025-08-11T10:07:24.580405",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "df_train = df_train_original['rule'].str.split(',',expand=True)\n",
+    "\n",
+    "df_train.fillna('0',inplace=True)\n",
+    "\n",
+    "df_train.columns = ['rule 1','rule 2','rule 3','rule 4']\n",
+    "\n",
+    "## till here it works perfectly\n",
+    "\n",
+    "df_train['rule 2'] = df_train['rule 2'].apply(lambda x : 1 if 'referral links' in str(x).lower() else 0)\n",
+    "\n",
+    "df_train = df_train.rename(columns = {'rule 2':'referral link allowed'})\n",
+    "\n",
+    "#column 0 (legal_advice)\n",
+    "\n",
+    "df_train['legal_advice_allowed'] = df_train['rule 1'].apply(lambda x: 0 if 'legal' in str(x).lower() else 1)\n",
+    "\n",
+    "#column 1\n",
+    "df_train['rule 4'] = df_train['rule 4'].apply(lambda x: 0 if 'promotional' in str(x).lower() else 1)\n",
+    "\n",
+    "df_train = df_train.rename(columns = {'rule 4':'Promotions allowed'})\n",
+    "\n",
+    "##column 1: advertising\n",
+    "\n",
+    "df_train['rule 3'] = df_train['rule 3'].apply(lambda x: 0 if 'advertising' in str(x).lower() else 1)\n",
+    "\n",
+    "df_train = df_train.rename(columns = {'rule 3':'Advertising allowed'})\n",
+    "\n",
+    "## Dealing with  spam part using new created dataframe\n",
+    "\n",
+    "df_train_1 = df_train['rule 1'].str.split(':',expand=True)\n",
+    "\n",
+    "df_train = df_train.drop(columns = ['rule 1'])\n",
+    "\n",
+    "df_train_1.columns = ['Advert','spam']\n",
+    "\n",
+    "df_train_1 = df_train_1.drop(columns = ['Advert'])\n",
+    "    \n",
+    "df_train_1['spam allowed'] = df_train_1['spam'].apply(lambda x: 0 if 'spam' in str(x).lower() else 1)\n",
+    "\n",
+    "df_train['spam allowed'] = df_train_1['spam allowed']\n",
+    "\n",
+    "### Testing Data \n",
+    "\n",
+    "df_test = df_test_original['rule'].str.split(',', expand=True)\n",
+    "\n",
+    "df_test.fillna('0', inplace=True)\n",
+    "\n",
+    "df_test.columns = ['rule 1', 'rule 2', 'rule 3', 'rule 4']\n",
+    "\n",
+    "## till here it works perfectly\n",
+    "\n",
+    "df_test['rule 2'] = df_test['rule 2'].apply(lambda x: 1 if 'referral links' in str(x).lower() else 0)\n",
+    "\n",
+    "df_test = df_test.rename(columns={'rule 2': 'referral link allowed'})\n",
+    "\n",
+    "# column 0 (legal_advice)\n",
+    "df_test['legal_advice_allowed'] = df_test['rule 1'].apply(lambda x: 0 if 'legal' in str(x).lower() else 1)\n",
+    "\n",
+    "# column 1\n",
+    "df_test['rule 4'] = df_test['rule 4'].apply(lambda x: 0 if 'promotional' in str(x).lower() else 1)\n",
+    "\n",
+    "df_test = df_test.rename(columns={'rule 4': 'Promotions allowed'})\n",
+    "\n",
+    "# column 1: advertising\n",
+    "df_test['rule 3'] = df_test['rule 3'].apply(lambda x: 0 if 'advertising' in str(x).lower() else 1)\n",
+    "\n",
+    "df_test = df_test.rename(columns={'rule 3': 'Advertising allowed'})\n",
+    "\n",
+    "## Dealing with spam part using new created dataframe\n",
+    "df_test_1 = df_test['rule 1'].str.split(':', expand=True)\n",
+    "\n",
+    "df_test = df_test.drop(columns=['rule 1'])\n",
+    "\n",
+    "df_test_1.columns = ['Advert', 'spam']\n",
+    "\n",
+    "df_test_1 = df_test_1.drop(columns=['Advert'])\n",
+    "    \n",
+    "df_test_1['spam allowed'] = df_test_1['spam'].apply(lambda x: 0 if 'spam' in str(x).lower() else 1)\n",
+    "\n",
+    "df_test['spam allowed'] = df_test_1['spam allowed']\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 6,
+   "id": "c03c77e5",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2025-08-11T10:07:24.647239Z",
+     "iopub.status.busy": "2025-08-11T10:07:24.646867Z",
+     "iopub.status.idle": "2025-08-11T10:07:24.656192Z",
+     "shell.execute_reply": "2025-08-11T10:07:24.655304Z"
+    },
+    "papermill": {
+     "duration": 0.016159,
+     "end_time": "2025-08-11T10:07:24.657905",
+     "exception": false,
+     "start_time": "2025-08-11T10:07:24.641746",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "for i in df_train.columns:\n",
+    "    df_train_original[i] = df_train[i]\n",
+    "\n",
+    "for i in df_test.columns:\n",
+    "    df_test_original[i] = df_test[i]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 7,
+   "id": "e6de223b",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2025-08-11T10:07:24.668021Z",
+     "iopub.status.busy": "2025-08-11T10:07:24.667708Z",
+     "iopub.status.idle": "2025-08-11T10:07:24.688777Z",
+     "shell.execute_reply": "2025-08-11T10:07:24.687762Z"
+    },
+    "papermill": {
+     "duration": 0.028382,
+     "end_time": "2025-08-11T10:07:24.690467",
+     "exception": false,
+     "start_time": "2025-08-11T10:07:24.662085",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "df_original = df_train_original[['body', 'rule_violation','referral link allowed', 'Advertising allowed',\n",
+    "           'Promotions allowed', 'legal_advice_allowed', 'spam allowed']]\n",
+    "    \n",
+    "df_p1 = df_train_original[['positive_example_1','rule_violation','referral link allowed', 'Advertising allowed',\n",
+    "               'Promotions allowed', 'legal_advice_allowed', 'spam allowed']]\n",
+    "\n",
+    "df_p1.loc[:,'rule_violation'] = 0\n",
+    "df_p1 = df_p1.rename(columns = {'positive_example_1':'body'})\n",
+    "        \n",
+    "df_p2 = df_train_original[['positive_example_2','rule_violation','referral link allowed', 'Advertising allowed',\n",
+    "               'Promotions allowed', 'legal_advice_allowed', 'spam allowed']]\n",
+    "\n",
+    "df_p2.loc[:,'rule_violation'] = 0\n",
+    "df_p2 = df_p2.rename(columns = {'positive_example_2':'body'})\n",
+    "        \n",
+    "df_n1 = df_train_original[['negative_example_1','rule_violation','referral link allowed', 'Advertising allowed',\n",
+    "               'Promotions allowed', 'legal_advice_allowed', 'spam allowed']]\n",
+    "\n",
+    "df_n1.loc[:,'rule_violation'] = 1\n",
+    "df_n1 = df_n1.rename(columns = {'negative_example_1':'body'})\n",
+    "        \n",
+    "df_n2 = df_train_original[['negative_example_2','rule_violation','referral link allowed', 'Advertising allowed',\n",
+    "               'Promotions allowed', 'legal_advice_allowed', 'spam allowed']]\n",
+    "\n",
+    "df_n2.loc[:,'rule_violation'] = 1\n",
+    "df_n2 = df_n2.rename(columns = {'negative_example_2':'body'})\n",
+    "    \n",
+    "df_train_total = pd.concat([df_original,df_p1,df_p2,df_n1,df_n2], axis = 0,ignore_index=True)\n",
+    "\n",
+    "\n",
+    "##TESTING DATA\n",
+    "\n",
+    "df_test_total = df_test_original[['body','referral link allowed', 'Advertising allowed',\n",
+    "           'Promotions allowed', 'legal_advice_allowed', 'spam allowed']]        "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 8,
+   "id": "db6964cc",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2025-08-11T10:07:24.700064Z",
+     "iopub.status.busy": "2025-08-11T10:07:24.699736Z",
+     "iopub.status.idle": "2025-08-11T10:07:25.210714Z",
+     "shell.execute_reply": "2025-08-11T10:07:25.209745Z"
+    },
+    "papermill": {
+     "duration": 0.517717,
+     "end_time": "2025-08-11T10:07:25.212396",
+     "exception": false,
+     "start_time": "2025-08-11T10:07:24.694679",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "text_file = df_train_total['body'].to_list()\n",
+    "    \n",
+    "pattern = re.compile('https?:\\/\\/\\S+|www\\.\\S+|Https?:\\/\\/\\S+|\\S+\\.com\\S+|\\S+\\.com|\\[.*?\\]|\\S+ \\. com.*')   ## Removing URLs\n",
+    "for i in range(len(text_file)):\n",
+    "    text_file[i] = pattern.sub(r'',text_file[i])\n",
+    "    \n",
+    "pattern = re.compile('<.*?>')       ##Removing HTML rags\n",
+    "for i in range(len(text_file)):\n",
+    "    text_file[i] = pattern.sub(r'',text_file[i]) \n",
+    "    \n",
+    "pattern = re.compile('#\\S+|@\\S+|\\S+\\@\\S+|\\S+@')             ## Removing Emails and Hashtags\n",
+    "for i in range(len(text_file)):\n",
+    "    text_file[i] = pattern.sub(r'',text_file[i])            ### Removing username and subreddit mentions\n",
+    "    \n",
+    "pattern = re.compile('u\\/\\S+|r\\/\\S+')\n",
+    "for i in range(len(text_file)):\n",
+    "    text_file[i] = pattern.sub(r'',text_file[i])\n",
+    "        \n",
+    "pattern = re.compile(\"[\"\n",
+    "                        u\"\\U0001F600-\\U0001F64F\"  # emoticons\n",
+    "                        u\"\\U0001F300-\\U0001F5FF\"  # symbols & pictographs\n",
+    "                        u\"\\U0001F680-\\U0001F6FF\"  # transport & map symbols\n",
+    "                        u\"\\U0001F1E0-\\U0001F1FF\"  # flags (iOS)\n",
+    "                        u\"\\U00002702-\\U000027B0\"\n",
+    "                        u\"\\U000024C2-\\U0001F251\"\n",
+    "                        \"]+\", flags=re.UNICODE)\n",
+    "for i in range(len(text_file)):\n",
+    "    text_file[i] = pattern.sub(r'',text_file[i])\n",
+    "\n",
+    "pattern = re.compile('\\d|\\\\n')             ##Removing Numbers & \\n spaces\n",
+    "for i in range(len(text_file)):\n",
+    "    text_file[i] = pattern.sub(r'',text_file[i])\n",
+    "\n",
+    "\n",
+    "##TESTING DATA -------------------------------------------------------\n",
+    "\n",
+    "text_file_1 = df_test_total['body'].to_list()\n",
+    "    \n",
+    "pattern = re.compile('https?:\\/\\/\\S+|www\\.\\S+|Https?:\\/\\/\\S+|\\S+\\.com\\S+|\\S+\\.com|\\[.*?\\]|\\S+ \\. com.*')   ## Removing URLs\n",
+    "for i in range(len(text_file_1)):\n",
+    "    text_file_1[i] = pattern.sub(r'',text_file_1[i])\n",
+    "    \n",
+    "pattern = re.compile('<.*?>')       ##Removing HTML rags\n",
+    "for i in range(len(text_file_1)):\n",
+    "    text_file_1[i] = pattern.sub(r'',text_file_1[i]) \n",
+    "    \n",
+    "pattern = re.compile('#\\S+|@\\S+|\\S+\\@\\S+|\\S+@')             ## Removing Emails and Hashtags\n",
+    "for i in range(len(text_file_1)):\n",
+    "    text_file_1[i] = pattern.sub(r'',text_file_1[i])            ### Removing username and subreddit mentions\n",
+    "    \n",
+    "pattern = re.compile('u\\/\\S+|r\\/\\S+')\n",
+    "for i in range(len(text_file_1)):\n",
+    "    text_file_1[i] = pattern.sub(r'',text_file_1[i])\n",
+    "        \n",
+    "pattern = re.compile(\"[\"\n",
+    "                        u\"\\U0001F600-\\U0001F64F\"  # emoticons\n",
+    "                        u\"\\U0001F300-\\U0001F5FF\"  # symbols & pictographs\n",
+    "                        u\"\\U0001F680-\\U0001F6FF\"  # transport & map symbols\n",
+    "                        u\"\\U0001F1E0-\\U0001F1FF\"  # flags (iOS)\n",
+    "                        u\"\\U00002702-\\U000027B0\"\n",
+    "                        u\"\\U000024C2-\\U0001F251\"\n",
+    "                        \"]+\", flags=re.UNICODE)\n",
+    "for i in range(len(text_file_1)):\n",
+    "    text_file_1[i] = pattern.sub(r'',text_file_1[i])\n",
+    "\n",
+    "pattern = re.compile('\\d|\\\\n')             ##Removing Numbers & \\n spaces\n",
+    "for i in range(len(text_file_1)):\n",
+    "    text_file_1[i] = pattern.sub(r'',text_file_1[i])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 9,
+   "id": "6447c040",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2025-08-11T10:07:25.222108Z",
+     "iopub.status.busy": "2025-08-11T10:07:25.221772Z",
+     "iopub.status.idle": "2025-08-11T10:07:25.229753Z",
+     "shell.execute_reply": "2025-08-11T10:07:25.228837Z"
+    },
+    "papermill": {
+     "duration": 0.014764,
+     "end_time": "2025-08-11T10:07:25.231445",
+     "exception": false,
+     "start_time": "2025-08-11T10:07:25.216681",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "df_train_total = df_train_total.drop(columns = ['body'])\n",
+    "df_test_total = df_test_total.drop(columns = ['body'])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 10,
+   "id": "a22a32ec",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2025-08-11T10:07:25.241561Z",
+     "iopub.status.busy": "2025-08-11T10:07:25.241158Z",
+     "iopub.status.idle": "2025-08-11T10:07:25.251071Z",
+     "shell.execute_reply": "2025-08-11T10:07:25.250296Z"
+    },
+    "papermill": {
+     "duration": 0.016758,
+     "end_time": "2025-08-11T10:07:25.252792",
+     "exception": false,
+     "start_time": "2025-08-11T10:07:25.236034",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "## Works perfectly\n",
+    "\n",
+    "x = df_train_total.drop(columns = ['rule_violation'])\n",
+    "y = df_train_total['rule_violation']\n",
+    "\n",
+    "x_train,x_test,y_train,y_test = train_test_split(x,y,train_size = 0.75, random_state = 42)\n",
+    "\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 11,
+   "id": "241c6780",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2025-08-11T10:07:25.263064Z",
+     "iopub.status.busy": "2025-08-11T10:07:25.262728Z",
+     "iopub.status.idle": "2025-08-11T10:07:31.790728Z",
+     "shell.execute_reply": "2025-08-11T10:07:31.789735Z"
+    },
+    "papermill": {
+     "duration": 6.534625,
+     "end_time": "2025-08-11T10:07:31.792357",
+     "exception": false,
+     "start_time": "2025-08-11T10:07:25.257732",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "lemmatizer = WordNetLemmatizer()\n",
+    "cleaned_text = []\n",
+    "preprocessed_training_text = []\n",
+    "for i in range(len(df_train_total)):\n",
+    "    text1 = re.sub('[^a-zA-Z]',' ',text_file[i])\n",
+    "    text1 = text1.lower()\n",
+    "    text1 = [lemmatizer.lemmatize(word) for word in text1 if word not in combined_stopwords]\n",
+    "    cleaned_text = ''.join(text1)\n",
+    "    preprocessed_training_text.append(cleaned_text)\n",
+    "\n",
+    "##TESTING DATA\n",
+    "\n",
+    "cleaned_text1 = []\n",
+    "preprocessed_testing_text1 = []\n",
+    "for i in range(len(df_test_total)):\n",
+    "    text1 = re.sub('[^a-zA-Z]',' ',text_file_1[i])\n",
+    "    text1 = text1.lower()\n",
+    "    text1 = [lemmatizer.lemmatize(word) for word in text1 if word not in combined_stopwords]\n",
+    "    cleaned_text1 = ''.join(text1)\n",
+    "    preprocessed_testing_text1.append(cleaned_text1)\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 12,
+   "id": "932ee755",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2025-08-11T10:07:31.801917Z",
+     "iopub.status.busy": "2025-08-11T10:07:31.801587Z",
+     "iopub.status.idle": "2025-08-11T10:07:31.808450Z",
+     "shell.execute_reply": "2025-08-11T10:07:31.807401Z"
+    },
+    "papermill": {
+     "duration": 0.013503,
+     "end_time": "2025-08-11T10:07:31.810088",
+     "exception": false,
+     "start_time": "2025-08-11T10:07:31.796585",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "df_train_total['body'] = preprocessed_training_text\n",
+    "df_test_total['body'] = preprocessed_testing_text1  ##Test file (not used right now)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 13,
+   "id": "548d3f8e",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2025-08-11T10:07:31.819847Z",
+     "iopub.status.busy": "2025-08-11T10:07:31.819523Z",
+     "iopub.status.idle": "2025-08-11T10:07:31.826216Z",
+     "shell.execute_reply": "2025-08-11T10:07:31.825572Z"
+    },
+    "papermill": {
+     "duration": 0.013152,
+     "end_time": "2025-08-11T10:07:31.827615",
+     "exception": false,
+     "start_time": "2025-08-11T10:07:31.814463",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "x = df_train_total.drop(columns = ['rule_violation'])\n",
+    "\n",
+    "y = df_train_total['rule_violation']"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 14,
+   "id": "55179893",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2025-08-11T10:07:31.837371Z",
+     "iopub.status.busy": "2025-08-11T10:07:31.836846Z",
+     "iopub.status.idle": "2025-08-11T10:07:31.840986Z",
+     "shell.execute_reply": "2025-08-11T10:07:31.840227Z"
+    },
+    "papermill": {
+     "duration": 0.010935,
+     "end_time": "2025-08-11T10:07:31.842891",
+     "exception": false,
+     "start_time": "2025-08-11T10:07:31.831956",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "# ##Now we have to do some tokenization\n",
+    "# x_train,x_test,y_train,y_test = train_test_split(x,y,train_size = 0.75, random_state = 42)\n",
+    "\n",
+    "# vector = TfidfVectorizer(max_features = 2500, ngram_range= (1,2))\n",
+    "\n",
+    "# x_train_tokenized = vector.fit_transform(x_train['body'])\n",
+    "# x_test_tokenized = vector.transform(x_test['body'])\n",
+    "\n",
+    "# xgb = XGBClassifier()\n",
+    "\n",
+    "# xgb.fit(x_train_tokenized,y_train)\n",
+    "\n",
+    "# y_pred = xgb.predict_proba(x_test_tokenized)[:,1]\n",
+    "\n",
+    "# print(roc_auc_score(y_test,y_pred))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "018f8ec0",
+   "metadata": {
+    "papermill": {
+     "duration": 0.004294,
+     "end_time": "2025-08-11T10:07:31.851680",
+     "exception": false,
+     "start_time": "2025-08-11T10:07:31.847386",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "source": [
+    "### ok,so this seems to work. Let's try to submit solution through this."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 15,
+   "id": "4c23051e",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2025-08-11T10:07:31.861202Z",
+     "iopub.status.busy": "2025-08-11T10:07:31.860458Z",
+     "iopub.status.idle": "2025-08-11T10:07:33.700198Z",
+     "shell.execute_reply": "2025-08-11T10:07:33.699518Z"
+    },
+    "papermill": {
+     "duration": 1.846438,
+     "end_time": "2025-08-11T10:07:33.702107",
+     "exception": false,
+     "start_time": "2025-08-11T10:07:31.855669",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "vector = TfidfVectorizer(max_features = 2500, ngram_range= (1,2))\n",
+    "\n",
+    "x_tokenized = vector.fit_transform(x['body'])\n",
+    "test_data_tokenized = vector.transform(df_test_total['body'])\n",
+    "\n",
+    "\n",
+    "xgb = XGBClassifier()\n",
+    "\n",
+    "xgb.fit(x_tokenized,y)\n",
+    "\n",
+    "y_pred = xgb.predict_proba(test_data_tokenized)[:,1]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 16,
+   "id": "7916679b",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2025-08-11T10:07:33.713711Z",
+     "iopub.status.busy": "2025-08-11T10:07:33.713360Z",
+     "iopub.status.idle": "2025-08-11T10:07:33.732758Z",
+     "shell.execute_reply": "2025-08-11T10:07:33.731729Z"
+    },
+    "papermill": {
+     "duration": 0.027679,
+     "end_time": "2025-08-11T10:07:33.734921",
+     "exception": false,
+     "start_time": "2025-08-11T10:07:33.707242",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "submission = pd.read_csv('/kaggle/input/jigsaw-agile-community-rules/sample_submission.csv')\n",
+    "\n",
+    "\n",
+    "submission['rule_violation'] = np.round(y_pred,2)\n",
+    "\n",
+    "submission.to_csv(\"submission.csv\", index=False, columns=[\"row_id\", \"rule_violation\"])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 17,
+   "id": "66a9e333",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2025-08-11T10:07:33.745232Z",
+     "iopub.status.busy": "2025-08-11T10:07:33.744900Z",
+     "iopub.status.idle": "2025-08-11T10:07:33.766416Z",
+     "shell.execute_reply": "2025-08-11T10:07:33.765488Z"
+    },
+    "papermill": {
+     "duration": 0.028571,
+     "end_time": "2025-08-11T10:07:33.768127",
+     "exception": false,
+     "start_time": "2025-08-11T10:07:33.739556",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [
+    {
+     "data": {
+      "text/html": [
+       "<div>\n",
+       "<style scoped>\n",
+       "    .dataframe tbody tr th:only-of-type {\n",
+       "        vertical-align: middle;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe tbody tr th {\n",
+       "        vertical-align: top;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe thead th {\n",
+       "        text-align: right;\n",
+       "    }\n",
+       "</style>\n",
+       "<table border=\"1\" class=\"dataframe\">\n",
+       "  <thead>\n",
+       "    <tr style=\"text-align: right;\">\n",
+       "      <th></th>\n",
+       "      <th>row_id</th>\n",
+       "      <th>rule_violation</th>\n",
+       "    </tr>\n",
+       "  </thead>\n",
+       "  <tbody>\n",
+       "    <tr>\n",
+       "      <th>0</th>\n",
+       "      <td>2029</td>\n",
+       "      <td>0.67</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>1</th>\n",
+       "      <td>2030</td>\n",
+       "      <td>0.48</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>2</th>\n",
+       "      <td>2031</td>\n",
+       "      <td>0.39</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>3</th>\n",
+       "      <td>2032</td>\n",
+       "      <td>0.77</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>4</th>\n",
+       "      <td>2033</td>\n",
+       "      <td>0.22</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>5</th>\n",
+       "      <td>2034</td>\n",
+       "      <td>0.62</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>6</th>\n",
+       "      <td>2035</td>\n",
+       "      <td>0.67</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>7</th>\n",
+       "      <td>2036</td>\n",
+       "      <td>0.63</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>8</th>\n",
+       "      <td>2037</td>\n",
+       "      <td>0.79</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>9</th>\n",
+       "      <td>2038</td>\n",
+       "      <td>0.22</td>\n",
+       "    </tr>\n",
+       "  </tbody>\n",
+       "</table>\n",
+       "</div>"
+      ],
+      "text/plain": [
+       "   row_id  rule_violation\n",
+       "0    2029            0.67\n",
+       "1    2030            0.48\n",
+       "2    2031            0.39\n",
+       "3    2032            0.77\n",
+       "4    2033            0.22\n",
+       "5    2034            0.62\n",
+       "6    2035            0.67\n",
+       "7    2036            0.63\n",
+       "8    2037            0.79\n",
+       "9    2038            0.22"
+      ]
+     },
+     "execution_count": 17,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "submission"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "43ebfe88",
+   "metadata": {
+    "papermill": {
+     "duration": 0.003956,
+     "end_time": "2025-08-11T10:07:33.776621",
+     "exception": false,
+     "start_time": "2025-08-11T10:07:33.772665",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": []
+  }
+ ],
+ "metadata": {
+  "kaggle": {
+   "accelerator": "none",
+   "dataSources": [
+    {
+     "databundleVersionId": 13121456,
+     "sourceId": 94635,
+     "sourceType": "competition"
+    }
+   ],
+   "dockerImageVersionId": 31089,
+   "isGpuEnabled": false,
+   "isInternetEnabled": false,
+   "language": "python",
+   "sourceType": "notebook"
+  },
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.11.13"
+  },
+  "papermill": {
+   "default_parameters": {},
+   "duration": 20.755691,
+   "end_time": "2025-08-11T10:07:35.004344",
+   "environment_variables": {},
+   "exception": null,
+   "input_path": "__notebook__.ipynb",
+   "output_path": "__notebook__.ipynb",
+   "parameters": {},
+   "start_time": "2025-08-11T10:07:14.248653",
+   "version": "2.6.0"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}
